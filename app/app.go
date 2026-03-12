@@ -29,16 +29,35 @@ type App struct {
 	Selection       *model.Selection
 	FrameCandidates *model.FrameCandidates
 
-	statusText string
-	analyzing  bool
+	medianF0    float64
+	previewNote string
+	playback    *audio.PlaybackController
+	statusText  string
+	analyzing   bool
 }
 
 func New(w fyne.Window) *App {
 	return &App{
-		fyneWin:   w,
-		win:       ui.NewWindow(),
-		Selection: model.NewSelection(),
+		fyneWin:     w,
+		win:         ui.NewWindow(),
+		Selection:   model.NewSelection(),
+		playback:    audio.NewPlaybackController(),
+		previewNote: "C3",
 	}
+}
+
+var noteFreqs = map[string]float64{
+	"C1": 32.703, "G1": 49.000,
+	"C2": 65.406, "G2": 98.000,
+	"C3": 130.813, "G3": 196.000,
+	"C4": 261.626, "G4": 392.000,
+}
+
+func noteToFreq(note string) float64 {
+	if f, ok := noteFreqs[note]; ok {
+		return f
+	}
+	return 130.813
 }
 
 // SetupUI wires callbacks and returns the root canvas object.
@@ -53,6 +72,28 @@ func (a *App) SetupUI() fyne.CanvasObject {
 	}
 	a.win.Waveform.OnSelectionChanged = func() {
 		a.win.InfoLabel.SetText(a.buildInfoText())
+	}
+	a.win.Candidates.OnPlayToggle = func(playing bool) {
+		if playing {
+			go a.startPreview()
+		} else {
+			go a.stopPreview()
+		}
+	}
+	a.win.Candidates.OnVolumeChanged = func(v float64) {
+		a.playback.SetVolume(v)
+	}
+	a.win.Candidates.OnSweepSpeedChanged = func(v float64) {
+		a.playback.SetSpeed(v)
+	}
+	a.win.Candidates.OnNoteChanged = func(note string) {
+		a.previewNote = note
+		if a.playback.IsPlaying() {
+			go a.startPreview()
+		}
+	}
+	a.playback.OnDone = func() {
+		fyne.Do(func() { a.win.Candidates.SetPlaying(false) })
 	}
 	return a.win.Content()
 }
@@ -98,6 +139,8 @@ func (a *App) loadFile() {
 	a.Selection = model.NewSelection()
 	a.win.Waveform.Viewport.Reset(len(sample.Samples))
 	a.statusText = fmt.Sprintf("Loaded: %s", sample.FileName)
+	a.stopPreview()
+	fyne.Do(func() { a.win.Candidates.SetPlaying(false) })
 	a.refreshAll()
 
 	a.analyze()
@@ -125,6 +168,7 @@ func (a *App) analyze() {
 	a.refreshAll()
 
 	pe := dsp.EstimatePitchEnvelope(a.Sample.Samples, a.Sample.SampleRate, 20, 5000)
+	a.medianF0 = pe.MedianF0
 	cycles := dsp.DetectCycles(a.Sample.Samples, a.Sample.SampleRate, pe)
 
 	a.Cycles = cycles
@@ -173,6 +217,24 @@ func (a *App) exportWavetable() {
 	a.statusText = fmt.Sprintf("Exported %d frames to %s", a.FrameCandidates.Count(), path)
 	a.refreshAll()
 }
+
+func (a *App) startPreview() {
+	if a.FrameCandidates.Count() == 0 {
+		fyne.Do(func() { a.win.Candidates.SetPlaying(false) })
+		return
+	}
+	frames := make([][]float64, a.FrameCandidates.Count())
+	for i, c := range a.FrameCandidates.Candidates {
+		frames[i] = c.PhaseAligned
+	}
+	freq := noteToFreq(a.previewNote)
+	if err := a.playback.Start(frames, freq); err != nil {
+		log.Printf("playback error: %v", err)
+		fyne.Do(func() { a.win.Candidates.SetPlaying(false) })
+	}
+}
+
+func (a *App) stopPreview() { a.playback.Stop() }
 
 func (a *App) buildInfoText() string {
 	if a.Sample == nil {

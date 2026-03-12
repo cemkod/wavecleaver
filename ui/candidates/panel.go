@@ -11,6 +11,7 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"wavecleaver/model"
@@ -29,16 +30,31 @@ var (
 type Panel struct {
 	widget.BaseWidget
 
+	OnPlayToggle        func(playing bool)
+	OnNoteChanged       func(note string)
+	OnVolumeChanged     func(volume float64)
+	OnSweepSpeedChanged func(speed float64)
+
 	mu           sync.RWMutex
 	fc           *model.FrameCandidates
+	playing      bool
+	note         string
 	scrollOffset float64
 	lastW, lastH int // last rendered raster pixel dimensions
 }
 
 func NewPanel() *Panel {
-	p := &Panel{}
+	p := &Panel{note: "C3"}
 	p.ExtendBaseWidget(p)
 	return p
+}
+
+// SetPlaying updates the playing state and refreshes the button icon.
+func (p *Panel) SetPlaying(v bool) {
+	p.mu.Lock()
+	p.playing = v
+	p.mu.Unlock()
+	p.Refresh()
 }
 
 // Update stores new frame candidates and triggers a redraw.
@@ -68,10 +84,70 @@ func (p *Panel) CreateRenderer() fyne.WidgetRenderer {
 		return img
 	})
 
+	var playBtn *widget.Button
+	playBtn = widget.NewButtonWithIcon("", theme.MediaPlayIcon(), func() {
+		p.mu.Lock()
+		nowPlaying := !p.playing
+		p.playing = nowPlaying
+		p.mu.Unlock()
+		if nowPlaying {
+			playBtn.SetIcon(theme.MediaStopIcon())
+		} else {
+			playBtn.SetIcon(theme.MediaPlayIcon())
+		}
+		if p.OnPlayToggle != nil {
+			p.OnPlayToggle(nowPlaying)
+		}
+	})
+	playBtn.Importance = widget.LowImportance
+
+	noteSelect := widget.NewSelect([]string{"C1", "G1", "C2", "G2", "C3", "G3", "C4", "G4"}, func(s string) {
+		p.mu.Lock()
+		p.note = s
+		p.mu.Unlock()
+		if p.OnNoteChanged != nil {
+			p.OnNoteChanged(s)
+		}
+	})
+	noteSelect.Selected = "C3"
+
+	volSlider := widget.NewSlider(0.0, 1.0)
+	volSlider.Value = 0.3
+	volSlider.Step = 0.01
+	volSlider.OnChanged = func(v float64) {
+		if p.OnVolumeChanged != nil {
+			p.OnVolumeChanged(v)
+		}
+	}
+
+	spdSlider := widget.NewSlider(0.25, 2.0)
+	spdSlider.Value = 1.0
+	spdSlider.Step = 0.05
+	spdSlider.OnChanged = func(v float64) {
+		if p.OnSweepSpeedChanged != nil {
+			p.OnSweepSpeedChanged(v)
+		}
+	}
+
+	labelColor := color.RGBA{R: 0xAA, G: 0xAA, B: 0xCC, A: 0xFF}
+	noteLabel := canvas.NewText("Note", labelColor)
+	noteLabel.TextSize = 9
+	volLabel := canvas.NewText("Vol", labelColor)
+	volLabel.TextSize = 9
+	spdLabel := canvas.NewText("Speed", labelColor)
+	spdLabel.TextSize = 9
+
 	return &panelRenderer{
-		panel:  p,
-		header: header,
-		raster: raster,
+		panel:      p,
+		header:     header,
+		raster:     raster,
+		playBtn:    playBtn,
+		noteSelect: noteSelect,
+		volSlider:  volSlider,
+		spdSlider:  spdSlider,
+		noteLabel:  noteLabel,
+		volLabel:   volLabel,
+		spdLabel:   spdLabel,
 	}
 }
 
@@ -246,15 +322,35 @@ func absInt(x int) int {
 // --- renderer ---
 
 type panelRenderer struct {
-	panel  *Panel
-	header *canvas.Text
-	raster *canvas.Raster
+	panel      *Panel
+	header     *canvas.Text
+	raster     *canvas.Raster
+	playBtn    *widget.Button
+	noteSelect *widget.Select
+	volSlider  *widget.Slider
+	spdSlider  *widget.Slider
+	noteLabel  *canvas.Text
+	volLabel   *canvas.Text
+	spdLabel   *canvas.Text
 }
 
 func (r *panelRenderer) Layout(size fyne.Size) {
-	const headerH = float32(20)
-	r.header.Resize(fyne.NewSize(size.Width, headerH))
-	r.header.Move(fyne.NewPos(4, 2))
+	const headerH = float32(46)
+	// Bottom row (y=24, height=20): controls right-to-left with 4px gaps.
+	r.playBtn.Resize(fyne.NewSize(24, 20))
+	r.playBtn.Move(fyne.NewPos(size.Width-28, 24))
+	r.volSlider.Resize(fyne.NewSize(100, 20))
+	r.volSlider.Move(fyne.NewPos(size.Width-132, 24))
+	r.spdSlider.Resize(fyne.NewSize(110, 20))
+	r.spdSlider.Move(fyne.NewPos(size.Width-246, 24))
+	r.noteSelect.Resize(fyne.NewSize(72, 20))
+	r.noteSelect.Move(fyne.NewPos(size.Width-322, 24))
+	// Top row (y=6): header text left, labels above their sliders.
+	r.header.Resize(fyne.NewSize(size.Width-326, 14))
+	r.header.Move(fyne.NewPos(4, 6))
+	r.noteLabel.Move(fyne.NewPos(size.Width-322, 6))
+	r.volLabel.Move(fyne.NewPos(size.Width-132, 6))
+	r.spdLabel.Move(fyne.NewPos(size.Width-246, 6))
 	r.raster.Resize(fyne.NewSize(size.Width, size.Height-headerH))
 	r.raster.Move(fyne.NewPos(0, headerH))
 }
@@ -266,6 +362,7 @@ func (r *panelRenderer) MinSize() fyne.Size {
 func (r *panelRenderer) Refresh() {
 	r.panel.mu.RLock()
 	fc := r.panel.fc
+	playing := r.panel.playing
 	r.panel.mu.RUnlock()
 
 	count := 0
@@ -274,13 +371,19 @@ func (r *panelRenderer) Refresh() {
 	}
 	r.header.Text = fmt.Sprintf("Frame Candidates: %d", count)
 	r.header.Refresh()
+	if playing {
+		r.playBtn.SetIcon(theme.MediaStopIcon())
+	} else {
+		r.playBtn.SetIcon(theme.MediaPlayIcon())
+	}
+	r.playBtn.Refresh()
 	canvas.Refresh(r.raster)
 }
 
 func (r *panelRenderer) Destroy() {}
 
 func (r *panelRenderer) Objects() []fyne.CanvasObject {
-	return []fyne.CanvasObject{r.raster, r.header}
+	return []fyne.CanvasObject{r.raster, r.header, r.playBtn, r.noteSelect, r.volSlider, r.spdSlider, r.noteLabel, r.volLabel, r.spdLabel}
 }
 
 // Compile-time interface checks.

@@ -1,0 +1,7 @@
+wavecleaver
+wavecleaver-*
+*.exe
+
+# Claude Code
+.claude/
+CLAUDE.md

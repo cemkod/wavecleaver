@@ -6,6 +6,7 @@ package app
 import (
 	"fmt"
 	"log"
+	"path/filepath"
 
 	"fyne.io/fyne/v2"
 
@@ -139,16 +140,23 @@ func (a *App) exportWavetable() {
 		return
 	}
 
-	path, err := dialog.File().
+	path, filterIdx, err := dialog.File().
 		Filter("Surge XT Wavetable .wt", "wt").
 		Filter("WAV Wavetable .wav", "wav").
 		Title("Export Wavetable").
-		Save()
+		SaveWithFilter()
 	if err != nil {
 		if err.Error() != "Cancelled" {
 			log.Printf("save dialog error: %v", err)
 		}
 		return
+	}
+	if filepath.Ext(path) == "" {
+		if filterIdx == 0 {
+			path += ".wt"
+		} else {
+			path += ".wav"
+		}
 	}
 
 	a.statusText = "Exporting..."

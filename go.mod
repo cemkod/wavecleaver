@@ -10,6 +10,8 @@ require (
 	gonum.org/v1/gonum v0.17.0
 )
 
+replace github.com/sqweek/dialog => ./dialog
+
 require (
 	fyne.io/systray v1.12.0 // indirect
 	github.com/BurntSushi/toml v1.5.0 // indirect

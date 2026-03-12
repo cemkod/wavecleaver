@@ -4,6 +4,8 @@
 package main
 
 import (
+	"os"
+
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
 
@@ -17,4 +19,5 @@ func main() {
 	controller := wavecleaverApp.New(w)
 	w.SetContent(controller.SetupUI())
 	w.ShowAndRun()
+	os.Exit(0)
 }

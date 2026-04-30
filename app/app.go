@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"strings"
 
 	"fyne.io/fyne/v2"
 
@@ -187,6 +188,7 @@ func (a *App) exportWavetable() {
 	path, filterIdx, err := dialog.File().
 		Filter("Surge XT Wavetable .wt", "wt").
 		Filter("WAV Wavetable .wav", "wav").
+		Filter("Individual frames (folder of .wav)", "wav").
 		Title("Export Wavetable").
 		SaveWithFilter()
 	if err != nil {
@@ -195,6 +197,27 @@ func (a *App) exportWavetable() {
 		}
 		return
 	}
+
+	if filterIdx == 2 {
+		path = strings.TrimSuffix(path, ".wav")
+		path = strings.TrimSuffix(path, ".WAV")
+
+		a.statusText = "Exporting frames..."
+		a.refreshAll()
+
+		err = audio.ExportIndividualFrames(path, a.Sample, a.FrameCandidates, a.win.Toolbar.FrameSizeValue())
+		if err != nil {
+			a.statusText = fmt.Sprintf("Export error: %v", err)
+			a.refreshAll()
+			log.Printf("export error: %v", err)
+			return
+		}
+
+		a.statusText = fmt.Sprintf("Exported %d frames to %s/", a.FrameCandidates.Count(), path)
+		a.refreshAll()
+		return
+	}
+
 	if filepath.Ext(path) == "" {
 		if filterIdx == 0 {
 			path += ".wt"

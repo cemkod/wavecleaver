@@ -13,8 +13,8 @@ Extract individual audio cycles from WAV files and export them as synthesizer wa
 - RMSE-based frame candidate selection to pick perceptually distinct cycles
 - Interactive waveform editor with zoom, pan, and multi-select
 - Scrollable thumbnail strip of detected frame candidates
-- Configurable frame size (256–4096 samples) and frame count (8–256 frames)
-- Export to **Serum** (WAV + CLM chunk) or **Surge XT** (`.wt` binary format)
+- **Configurable frame size (256–4096 samples) and frame count (8–256 frames)**
+- **Export to Serum** (WAV + CLM chunk), **Surge XT** (`.wt` binary format), or as **individual frame WAVs** (each frame written to a folder)
 
 ## Requirements
 
@@ -50,6 +50,7 @@ go run main.go
 |-----------|-------------|----------------|
 | `.wav`    | Serum (and compatible) | 32-bit IEEE float WAV with a `clm ` RIFF chunk encoding the frame size |
 | `.wt`     | Surge XT    | `vawt` binary format: header + 32-bit float samples |
+| Folder of `.wav` frames | Multiple    | Writes each frame candidate as a numbered 32-bit IEEE float WAV in a folder |
 
 ## Architecture
 

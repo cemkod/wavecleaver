@@ -12,6 +12,91 @@ import (
 	"wavecleaver/util"
 )
 
+// ExportIndividualFrames writes each frame candidate as a separate WAV file
+// into dir. Files are named <dir's base name>_<NNN>.wav zero-padded to
+// the width of the candidate count. The directory is created if needed.
+func ExportIndividualFrames(dir string, sample *model.Sample, fc *model.FrameCandidates, frameSize int) error {
+	if fc.Count() == 0 {
+		return fmt.Errorf("no frame candidates to export")
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create directory %s: %w", dir, err)
+	}
+
+	baseName := filepath.Base(dir)
+	padWidth := int(math.Floor(math.Log10(float64(fc.Count())))) + 1
+
+	for i, c := range fc.Candidates {
+		frame := c.PhaseAligned
+		if len(frame) == 0 {
+			frame = util.Resample(c.Normalized, frameSize)
+		}
+		fname := fmt.Sprintf("%s_%0*d.wav", baseName, padWidth, i+1)
+		fpath := filepath.Join(dir, fname)
+		if err := writeSingleFrameWAV(fpath, frame, sample.SampleRate); err != nil {
+			return fmt.Errorf("write %s: %w", fname, err)
+		}
+	}
+
+	return nil
+}
+
+// writeSingleFrameWAV writes a single-cycle mono WAV file as 32-bit IEEE float.
+func writeSingleFrameWAV(path string, samples []float64, sampleRate int) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("create wav: %w", err)
+	}
+	defer f.Close()
+
+	numSamples := len(samples)
+	bitsPerSample := 32
+	bytesPerSample := bitsPerSample / 8
+	dataSize := numSamples * bytesPerSample
+
+	fmtChunkSize := 16
+	totalSize := 4 + // "WAVE"
+		8 + fmtChunkSize + // fmt chunk
+		8 + dataSize // data chunk
+
+	write := func(data interface{}) {
+		if err != nil {
+			return
+		}
+		err = binary.Write(f, binary.LittleEndian, data)
+	}
+
+	f.Write([]byte("RIFF"))
+	write(uint32(totalSize))
+	f.Write([]byte("WAVE"))
+
+	f.Write([]byte("fmt "))
+	write(uint32(fmtChunkSize))
+	write(uint16(3)) // IEEE float format
+	write(uint16(1)) // mono
+	write(uint32(sampleRate))
+	write(uint32(sampleRate * bytesPerSample)) // byte rate
+	write(uint16(bytesPerSample))              // block align
+	write(uint16(bitsPerSample))
+
+	f.Write([]byte("data"))
+	write(uint32(dataSize))
+
+	if err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
+
+	for _, s := range samples {
+		clamped := math.Max(-1, math.Min(1, s))
+		if err := binary.Write(f, binary.LittleEndian, float32(clamped)); err != nil {
+			return fmt.Errorf("write sample: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // ExportWavetable resamples each frame candidate to frameSize samples and writes
 // either a Surge .wt file or a Serum-compatible WAV depending on the path extension.
 func ExportWavetable(path string, sample *model.Sample, fc *model.FrameCandidates, frameSize int) error {
